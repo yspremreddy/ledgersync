@@ -42,7 +42,8 @@ services:
     mem_limit: 448m
     shm_size: 128m
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ledgersync_admin -d postgres && psql -U ledgersync_admin -d postgres -Atqc 'SELECT 1' | grep -qx 1"]
+      # TCP stays unavailable during PostgreSQL's temporary init-only server.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ledgersync_admin -d postgres && psql -U ledgersync_admin -d postgres -Atqc 'SELECT 1' | grep -qx 1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -73,7 +74,9 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       KAFKA_DEFAULT_REPLICATION_FACTOR: "1"
       KAFKA_MIN_INSYNC_REPLICAS: "1"
@@ -85,6 +88,7 @@ services:
       KAFKA_LOG_RETENTION_HOURS: "24"
       KAFKA_LOG_RETENTION_BYTES: "16777216"
       KAFKA_LOG_SEGMENT_BYTES: "8388608"
+      KAFKA_LOG_CLEANER_DEDUPE_BUFFER_SIZE: "16777216"
       KAFKA_HEAP_OPTS: -Xms128m -Xmx384m
     depends_on:
       kafka-storage-init:

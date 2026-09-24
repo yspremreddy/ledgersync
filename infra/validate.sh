@@ -43,7 +43,8 @@ app_check() {
 }
 
 echo "== 1. Validate Compose and build Python 3.13 image =="
-bash -n infra/validate.sh infra/postgres/01-init.sh
+bash -n infra/validate.sh
+bash -n infra/postgres/01-init.sh
 "${COMPOSE[@]}" version
 "${COMPOSE[@]}" --profile tools config --quiet
 "${COMPOSE[@]}" --profile tools build app
