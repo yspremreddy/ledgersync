@@ -1,0 +1,22 @@
+{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "tasks.max": "1",
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "ledger_cdc",
+  "database.dbname": "ledger_source",
+  "topic.prefix": "ledgersync.cdc",
+  "plugin.name": "pgoutput",
+  "slot.name": "ledgersync_smoke_slot",
+  "publication.name": "ledgersync_smoke_publication",
+  "publication.autocreate.mode": "disabled",
+  "table.include.list": "public.cdc_smoke",
+  "snapshot.mode": "no_data",
+  "slot.drop.on.stop": "false",
+  "max.batch.size": "128",
+  "max.queue.size": "512",
+  "max.queue.size.in.bytes": "4194304",
+  "poll.interval.ms": "500",
+  "heartbeat.interval.ms": "0",
+  "tombstones.on.delete": "false"
+}
