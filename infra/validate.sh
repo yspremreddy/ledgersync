@@ -33,7 +33,9 @@ finish() {
 trap 'finish "$?"' EXIT
 
 kafka_tool() {
-  "${COMPOSE[@]}" exec -T -e 'KAFKA_HEAP_OPTS=-Xms16m -Xmx128m' kafka "/opt/kafka/bin/$@"
+  local tool="$1"
+  shift
+  "${COMPOSE[@]}" exec -T -e 'KAFKA_HEAP_OPTS=-Xms16m -Xmx128m' kafka "/opt/kafka/bin/$tool" "$@"
 }
 
 app_check() {
@@ -41,6 +43,7 @@ app_check() {
 }
 
 echo "== 1. Validate Compose and build Python 3.13 image =="
+bash -n infra/validate.sh infra/postgres/01-init.sh
 "${COMPOSE[@]}" version
 "${COMPOSE[@]}" --profile tools config --quiet
 "${COMPOSE[@]}" --profile tools build app
@@ -87,4 +90,41 @@ done
 
 echo "== 6. Insert a unique smoke row =="
 marker="smoke-$(date -u +%Y%m%dT%H%M%S)-${RANDOM}-${RANDOM}"
-printf '%s\n'
+printf '%s\n' "$marker" | tee "$REPORT/marker.txt"
+"${COMPOSE[@]}" exec -T postgres psql -U ledgersync_admin -d ledger_source \
+  -v ON_ERROR_STOP=1 -v marker="$marker" <<'SQL'
+INSERT INTO public.cdc_smoke (marker) VALUES (:'marker');
+SELECT slot_name, active, wal_status,
+       pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS retained_wal_bytes
+FROM pg_replication_slots WHERE slot_name = 'ledgersync_smoke_slot';
+SQL
+
+echo "== 7. Read Kafka and assert this insert reached the CDC topic =="
+# Read retained smoke events, then check the new marker. This tolerates redelivery
+# and repeated runs without relying on a sleep or accepting an old snapshot.
+# The console consumer exits nonzero on its intentional idle timeout.
+consumer_status=0
+kafka_tool kafka-console-consumer.sh --bootstrap-server kafka:9092 \
+  --topic ledgersync.cdc.public.cdc_smoke --from-beginning --timeout-ms 30000 \
+  > "$REPORT/cdc-events.jsonl" 2> "$REPORT/consumer.log" || consumer_status=$?
+if ((consumer_status != 0)); then
+  if ((consumer_status != 1)) || ! grep -q 'org.apache.kafka.common.errors.TimeoutException' "$REPORT/consumer.log"; then
+    cat "$REPORT/consumer.log"
+    echo "Kafka consumer failed with unexpected exit status $consumer_status."
+    exit 1
+  fi
+fi
+app_check event "$marker" < "$REPORT/cdc-events.jsonl"
+app_check status
+
+echo "== 8. Verify final health and capture memory =="
+ids=()
+for service in postgres kafka connect; do
+  id="$("${COMPOSE[@]}" ps -q "$service")"
+  [[ -n "$id" ]] || { echo "$service is not running."; exit 1; }
+  state="$(docker inspect --format '{{.State.Health.Status}} {{.State.OOMKilled}}' "$id")"
+  [[ "$state" == 'healthy false' ]] || { echo "$service has unexpected state: $state"; exit 1; }
+  ids+=("$id")
+done
+docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}' "${ids[@]}" | tee "$REPORT/memory.txt"
+echo "CDC smoke test passed; measured memory is in memory.txt (not a peak measurement)."
