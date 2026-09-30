@@ -11,9 +11,9 @@ services:
     image: postgres:16.8-bookworm
     environment:
       POSTGRES_USER: ledgersync_admin
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-postgres-only}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       POSTGRES_DB: postgres
-      CDC_PASSWORD: ${CDC_PASSWORD:-local-cdc-only}
+      CDC_PASSWORD: "${CDC_PASSWORD:?Set CDC_PASSWORD in .env}"
     command:
       - postgres
       - -c
@@ -112,6 +112,7 @@ services:
     command: ["/kafka/config/ledgersync.properties"]
     environment:
       KAFKA_HEAP_OPTS: -Xms128m -Xmx256m
+      KAFKA_LOG4J_OPTS: -Dlog4j.configuration=file:/kafka/config.orig/connect-log4j.properties
     volumes:
       - ./infra/debezium/worker.properties:/kafka/config/ledgersync.properties:ro
     depends_on:
@@ -137,7 +138,7 @@ services:
       dockerfile: Dockerfile
     environment:
       CONNECT_URL: http://connect:8083
-      CDC_PASSWORD: ${CDC_PASSWORD:-local-cdc-only}
+      CDC_PASSWORD: "${CDC_PASSWORD:?Set CDC_PASSWORD in .env}"
     mem_limit: 128m
     read_only: true
     cap_drop: ["ALL"]

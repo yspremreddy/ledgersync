@@ -10,7 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-CONNECTOR = "ledgersync-smoke"
+CONNECTOR = "ledgersync-postgres-cdc"
 BASE_URL = os.environ.get("CONNECT_URL", "http://connect:8083").rstrip("/")
 
 
@@ -59,7 +59,10 @@ def wait_running():
 
 def configure():
     config_path = Path(__file__).with_name("connector.json")
-    config = json.loads(config_path.read_text(encoding="utf-8"))
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    if payload.get("name") != CONNECTOR:
+        raise RuntimeError(f"Expected connector name {CONNECTOR} in connector.json.")
+    config = payload["config"]
     config["database.password"] = os.environ["CDC_PASSWORD"]
     plugins = request_json("/connector-plugins")
     if not any(plugin.get("class") == config["connector.class"] for plugin in plugins):
@@ -113,9 +116,11 @@ def check_event(marker):
             and after.get("marker") == marker
         ):
             matches += 1
-    if not matches:
-        raise RuntimeError(f"No streaming CDC insert found for marker {marker}.")
-    print(f"PASS: streaming CDC insert found for {marker} ({matches} delivery/deliveries).")
+    if matches != 1:
+        raise RuntimeError(
+            f"Expected exactly one streaming CDC insert for marker {marker}; found {matches}."
+        )
+    print(f"PASS: exactly one streaming CDC insert found for {marker}.")
 
 
 def main():

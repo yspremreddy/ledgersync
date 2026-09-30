@@ -5,16 +5,30 @@ This phase contains **no reconciliation, analytics, or FastAPI functionality**.
 
 ## Requirements
 
-- Windows with WSL2 and Docker Desktop using Linux containers; enable Docker integration for your WSL distribution.
-- Docker Compose v2.24 or later and Bash inside WSL2.
+- Windows with Docker Desktop using Linux containers.
+- Docker Compose v2.24 or later and Windows PowerShell 5.1 or PowerShell 7.
+- Bash inside a Docker-integrated WSL2 distribution only when using the optional Bash validator.
 - Approximately 3.5 GB allocated to Docker. Stop unrelated containers first.
 - Internet access for the initial image pulls/build. No PaySim download, host Python, Java, PostgreSQL, curl, or jq installation is required.
-- Keep the checkout in the WSL Linux filesystem, such as `~/projects/ledgersync`, rather than `/mnt/c` where practical.
+- Keep a WSL checkout in its Linux filesystem rather than `/mnt/c` where practical. A normal Windows checkout is supported by the PowerShell validator.
 - Host ports 15432, 19092, and 18083 must be available.
 
 ## Run and validate
 
-From the repository root in WSL2:
+Create the ignored local environment file once and set both values to non-empty local-development passwords:
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env before continuing.
+```
+
+From the repository root in Windows PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\infra\validate.ps1
+```
+
+The PowerShell validator uses `docker compose` when `docker.exe` is available and falls back to Docker Desktop's standalone Compose plugin. The existing Bash path remains available from a Docker-integrated WSL2 distribution:
 
 ```bash
 bash infra/validate.sh
@@ -28,14 +42,14 @@ The script:
 4. Creates a tiny source table/publication and explicitly provisions topics.
 5. Starts Kafka Connect, checks for the PostgreSQL plugin, registers the connector, and waits for its task and replication slot.
 6. Inserts one uniquely marked row into `ledger_source.public.cdc_smoke`.
-7. Consumes Kafka and requires a matching Debezium streaming insert (`op=c`), not a stale event or snapshot.
+7. Consumes Kafka and requires exactly one matching Debezium streaming insert (`op=c`), not a stale event or snapshot.
 8. Rechecks service health, records OOM/restart state, and measures current container memory.
 
 The consumer deliberately waits for a 30-second idle timeout before checking its output. A timeout in `consumer.log` alone is not a failure; the script must still find the newly inserted marker.
 
-Each run writes evidence beneath `.local/infra-validation/<timestamp>-<pid>/`: validation output, topic descriptions, the marker, Kafka events, service logs, container state, and memory measurements. This directory is ignored by Git. Connector configuration and credentials are not printed by the helper.
+Each run writes evidence beneath `.local/infra-validation/<timestamp>-<pid>/`: validation output, topic descriptions, the marker, Kafka events, service logs, container state, and memory measurements. This directory is ignored by Git. Connector configuration and credentials are not printed by the helper. The PowerShell path also records raw cgroup usage, an inactive-cache-adjusted working set, peak usage, and OOM counters.
 
-**Validation status at authoring:** configuration has been reviewed through repository tools only. Docker/Compose execution was unavailable. Image pulls, startup, CDC delivery, and actual memory use remain unverified until the script runs successfully on a Docker host. Configured ceilings are not measurements.
+**Latest local validation (2026-10-01):** the complete PostgreSQL -> Debezium -> Kafka path passed on Docker Desktop through `infra/validate.ps1`. PostgreSQL, Kafka, and Connect were healthy; connector `ledgersync-postgres-cdc` and its task were `RUNNING`; replication slot `ledgersync_smoke_slot` was active; and a uniquely marked PostgreSQL insert was consumed exactly once from `ledgersync.cdc.public.cdc_smoke` as a Debezium streaming create event (`op=c`). This is a point-in-time result, not a substitute for rerunning the platform-appropriate validator after changes.
 
 The script leaves services running and preserves all data. Rerunning it reuses the databases, topics, connector, and slot, and inserts one new test row. Run one validation at a time. It creates missing topics but does not silently change existing topic configurations.
 
@@ -93,7 +107,7 @@ Source topics use bounded retention, and automatic broker topic creation is disa
 
 ## Configuration and local boundaries
 
-Defaults are local-development credentials: administrator `ledgersync_admin` / `local-postgres-only`, and CDC user `ledger_cdc` / `local-cdc-only`. Optional `POSTGRES_PASSWORD` and `CDC_PASSWORD` values can be placed in a repository-local `.env` before the first run; `.env` is ignored by Git and the image build.
+The administrator username is `ledgersync_admin` and the CDC username is `ledger_cdc`. Their required `POSTGRES_PASSWORD` and `CDC_PASSWORD` values belong in the repository-local `.env`; the file is ignored by Git and the image build. `.env.example` contains only blank variable names, so no password is tracked.
 
 Database initialization scripts run only on an empty PostgreSQL volume. Changing `.env` later does not rotate existing database passwords. Keep existing values for repeat runs unless deliberately rotating the corresponding database role as well.
 
