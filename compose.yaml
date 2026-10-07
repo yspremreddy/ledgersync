@@ -131,6 +131,113 @@ services:
       start_period: 45s
     logging: *logging
 
+  ingestion-migrate:
+    image: postgres:16.8-bookworm
+    environment:
+      PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      INGEST_PASSWORD: "${INGEST_PASSWORD:?Set INGEST_PASSWORD in .env}"
+      API_PASSWORD: "${API_PASSWORD:?Set API_PASSWORD in .env}"
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - |
+        psql --host=postgres --username=ledgersync_admin --dbname=ledgersync \
+          --set=ingest_password="$$INGEST_PASSWORD" \
+          --file=/migrations/001_raw_cdc.sql
+        psql --host=postgres --username=ledgersync_admin --dbname=ledgersync \
+          --file=/migrations/002_reconciliation.sql
+        psql --host=postgres --username=ledgersync_admin --dbname=ledger_source \
+          --file=/migrations/ledger.sql
+        psql --host=postgres --username=ledgersync_admin --dbname=ledgersync \
+          --set=api_password="$$API_PASSWORD" \
+          --file=/migrations/003_api_reader.sql
+        psql --host=postgres --username=ledgersync_admin --dbname=ledgersync \
+          --file=/migrations/004_quality.sql
+    volumes:
+      - ./infra/postgres/001-raw-cdc.sql:/migrations/001_raw_cdc.sql:ro
+      - ./infra/postgres/002-reconciliation.sql:/migrations/002_reconciliation.sql:ro
+      - ./infra/postgres/ledger.sql:/migrations/ledger.sql:ro
+      - ./infra/postgres/003-api-reader.sql:/migrations/003_api_reader.sql:ro
+      - ./infra/postgres/004-quality.sql:/migrations/004_quality.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 96m
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: ingestion/Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_GROUP_ID: ledgersync-raw-ingestion-v1
+      KAFKA_TOPICS: ledgersync.cdc.public.cdc_smoke,ledgersync.cdc.public.ledger_entries
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ledgersync
+      PGUSER: ledger_ingest
+      PGPASSWORD: "${INGEST_PASSWORD:?Set INGEST_PASSWORD in .env}"
+      PGCONNECT_TIMEOUT: "10"
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      connect:
+        condition: service_healthy
+      ingestion-migrate:
+        condition: service_completed_successfully
+    mem_limit: 192m
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *logging
+
+  api:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ledgersync
+      PGUSER: ledger_api
+      PGPASSWORD: "${API_PASSWORD:?Set API_PASSWORD in .env}"
+      PGCONNECT_TIMEOUT: "5"
+      PGSTATEMENT_TIMEOUT_MS: "5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingestion-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:18000:8000"
+    mem_limit: 128m
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    logging: *logging
+
   app:
     profiles: ["tools"]
     build:

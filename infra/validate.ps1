@@ -186,6 +186,8 @@ try {
     }
     $smokeSql = Get-Content -LiteralPath (Join-Path $Root "infra\postgres\smoke.sql") -Raw
     Invoke-Compose exec -T postgres psql -U ledgersync_admin -d ledger_source -v ON_ERROR_STOP=1 -c $smokeSql
+    $ledgerSql = Get-Content -LiteralPath (Join-Path $Root "infra\postgres\ledger.sql") -Raw
+    Invoke-Compose exec -T postgres psql -U ledgersync_admin -d ledger_source -v ON_ERROR_STOP=1 -c $ledgerSql
 
     Write-Output "== 4. Provision explicit application and Connect topics =="
     foreach ($topic in @("ledgersync.gateway.v1", "ledgersync.ledger.outbox.v1", "ledgersync.settlement.v1", "ledgersync.refund.v1", "ledgersync.dlq.v1")) {
@@ -195,6 +197,7 @@ try {
         Invoke-KafkaTool kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic $topic --partitions 1 --replication-factor 1 --config cleanup.policy=compact
     }
     Invoke-KafkaTool kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ledgersync.cdc.public.cdc_smoke --partitions 1 --replication-factor 1 --config cleanup.policy=delete --config retention.ms=3600000 --config retention.bytes=16777216
+    Invoke-KafkaTool kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ledgersync.cdc.public.ledger_entries --partitions 1 --replication-factor 1 --config cleanup.policy=delete --config retention.ms=3600000 --config retention.bytes=16777216
     $topics = @(Invoke-KafkaTool kafka-topics.sh --bootstrap-server kafka:9092 --describe)
     $topics | ForEach-Object { Write-Output $_ }
     Write-Utf8Lines (Join-Path $Report "topics.txt") $topics

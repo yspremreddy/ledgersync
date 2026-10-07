@@ -12,8 +12,17 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_publication WHERE pubname = 'ledgersync_smoke_publication'
     ) THEN
-        CREATE PUBLICATION ledgersync_smoke_publication
-            FOR TABLE public.cdc_smoke;
+        CREATE PUBLICATION ledgersync_smoke_publication;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'ledgersync_smoke_publication'
+          AND schemaname = 'public'
+          AND tablename = 'cdc_smoke'
+    ) THEN
+        ALTER PUBLICATION ledgersync_smoke_publication
+            ADD TABLE public.cdc_smoke;
     END IF;
 END
 $$;

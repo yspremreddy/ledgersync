@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create ephemeral test credentials
+        shell: bash
+        run: |
+          echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+          echo "CDC_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+          echo "INGEST_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+          echo "API_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+
+      - name: Check whitespace
+        shell: bash
+        run: |
+          git diff --check
+          git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+
+      - name: Validate Compose configuration
+        run: docker compose --profile tools config --quiet
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            app/requirements.txt
+            ingestion/requirements.txt
+
+      - name: Install focused Python dependencies
+        run: python -m pip install -r ingestion/requirements.txt -r app/requirements.txt
+
+      - name: Run focused Python tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Start PostgreSQL and apply SQL migrations
+        shell: bash
+        run: |
+          docker compose up -d --wait postgres
+          docker compose run --rm --no-deps ingestion-migrate
+
+      - name: Run transactional SQL tests
+        shell: bash
+        run: |
+          for test_file in \
+            tests/reconciliation.sql \
+            tests/incremental_reconciliation.sql \
+            tests/reconciliation_history.sql \
+            tests/quality.sql
+          do
+            docker compose exec -T postgres \
+              psql -U ledgersync_admin -d ledgersync < "$test_file"
+          done
+
+      - name: Show PostgreSQL logs on failure
+        if: failure()
+        run: docker compose logs --tail=200 postgres ingestion-migrate
+
+      - name: Stop CI containers
+        if: always()
+        run: docker compose down

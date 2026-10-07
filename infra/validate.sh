@@ -59,6 +59,7 @@ echo "== 3. Verify databases and logical replication =="
 wal_level="$("${COMPOSE[@]}" exec -T postgres psql -U ledgersync_admin -d postgres -Atqc 'SHOW wal_level')"
 [[ "$wal_level" == logical ]] || { echo "Expected wal_level=logical; got $wal_level"; exit 1; }
 "${COMPOSE[@]}" exec -T postgres psql -U ledgersync_admin -d ledger_source -v ON_ERROR_STOP=1 < infra/postgres/smoke.sql
+"${COMPOSE[@]}" exec -T postgres psql -U ledgersync_admin -d ledger_source -v ON_ERROR_STOP=1 < infra/postgres/ledger.sql
 
 echo "== 4. Provision explicit application and Connect topics =="
 for topic in ledgersync.gateway.v1 ledgersync.ledger.outbox.v1 ledgersync.settlement.v1 ledgersync.refund.v1 ledgersync.dlq.v1; do
@@ -72,6 +73,9 @@ for topic in ledgersync.connect.configs ledgersync.connect.offsets ledgersync.co
 done
 kafka_tool kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
   --topic ledgersync.cdc.public.cdc_smoke --partitions 1 --replication-factor 1 \
+  --config cleanup.policy=delete --config retention.ms=3600000 --config retention.bytes=16777216
+kafka_tool kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+  --topic ledgersync.cdc.public.ledger_entries --partitions 1 --replication-factor 1 \
   --config cleanup.policy=delete --config retention.ms=3600000 --config retention.bytes=16777216
 kafka_tool kafka-topics.sh --bootstrap-server kafka:9092 --describe | tee "$REPORT/topics.txt"
 
