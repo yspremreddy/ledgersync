@@ -12,5 +12,5 @@ COPY app /srv/ledgersync/app
 COPY tests/test_api.py /srv/ledgersync/tests/test_api.py
 
 USER 10001:10001
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+EXPOSE 18000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "18000", "--no-access-log"]

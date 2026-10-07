@@ -220,7 +220,7 @@ services:
       ingestion-migrate:
         condition: service_completed_successfully
     ports:
-      - "127.0.0.1:18000:8000"
+      - "127.0.0.1:18000:18000"
     mem_limit: 128m
     init: true
     read_only: true
@@ -231,11 +231,40 @@ services:
     restart: unless-stopped
     stop_grace_period: 15s
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18000/health', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 6
       start_period: 10s
+    logging: *logging
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    environment:
+      LEDGERSYNC_API_BASE_URL: http://api:18000
+      LEDGERSYNC_DEMO_TRANSACTION_ID: final-e2e-20261007-mvp-final-tx-match
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8501:8501"
+    mem_limit: 128m
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     logging: *logging
 
   app:

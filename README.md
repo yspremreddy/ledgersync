@@ -32,6 +32,9 @@ reconciliation.ledger_current
                                       │
                                       ▼
                               read-only FastAPI
+                                      │
+                                      ▼
+                              Streamlit dashboard
 ```
 
 The CDC topics are `ledgersync.cdc.public.cdc_smoke` and
@@ -47,6 +50,7 @@ project-scoped named volumes and are not deleted by normal startup or tests.
 | Debezium Connect 3.0 | PostgreSQL CDC connector | 640 MiB |
 | Python ingestion | Durable raw event/DLQ writer | 192 MiB |
 | FastAPI | Read-only investigation API | 128 MiB |
+| Streamlit | Read-only investigation dashboard | 128 MiB |
 | Migration job | Idempotent database migrations | 96 MiB |
 
 The API, ingestion, and migration containers run as non-root with read-only
@@ -123,6 +127,52 @@ per-topic/partition checkpoint lag:
 - `quality.reconciliation_result_counts`
 - `quality.cdc_checkpoint_lag`
 
+## Streamlit dashboard
+
+The dashboard binds to `http://127.0.0.1:8501`. It communicates only with the
+FastAPI service (`Streamlit → FastAPI → PostgreSQL`) and receives no database
+credentials. Its API base URL is configurable with
+`LEDGERSYNC_API_BASE_URL` and defaults to `http://api:18000` in Docker.
+
+Dashboard sections provide:
+
+- An operational overview of CDC, DLQ, current/deleted ledger, reconciliation,
+  checkpoint-lag, and latest-run metrics
+- Filterable reconciliation results and recent run summaries
+- Transaction-level ledger and reconciliation investigation
+- Latest data-quality PASS/FAIL results with failure details
+- API and database health with manual refresh
+
+## Screenshots
+
+All displayed transaction data is synthetic demo data. The mismatch, missing,
+duplicate, update, and delete cases use deterministic fault injection so the
+reconciliation and quality outcomes are reproducible.
+
+**Operational dashboard** — CDC, DLQ, ledger, reconciliation, checkpoint, and
+latest-run metrics.
+
+![LedgerSync operational dashboard](docs/screenshots/01-dashboard.png)
+
+**Reconciliation results** — current classifications with source evidence and
+recent runs.
+
+![LedgerSync reconciliation results](docs/screenshots/02-reconciliation.png)
+
+**Transaction investigation** — matching synthetic ledger records and their
+reconciliation result.
+
+![LedgerSync transaction investigation](docs/screenshots/03-transaction-investigation.png)
+
+**Data quality** — latest PASS/FAIL checks with affected-row counts.
+
+![LedgerSync data-quality checks](docs/screenshots/04-data-quality.png)
+
+**Run history** — source pairs, completion status, timestamps, and result
+counts.
+
+![LedgerSync reconciliation run history](docs/screenshots/05-run-history.png)
+
 ## Read-only API
 
 The API binds to `http://127.0.0.1:18000` and exposes only GET routes:
@@ -148,8 +198,8 @@ Invoke-RestMethod http://localhost:18000/metrics
 ## Local startup
 
 Requirements are Docker Desktop with Linux containers, Compose v2.24+, and
-Windows PowerShell. Allocate about 3.5 GB to Docker and keep ports 15432, 19092,
-18083, and 18000 available.
+Windows PowerShell. Allocate about 3.5 GB to Docker and keep ports 8501, 15432,
+19092, 18083, and 18000 available.
 
 Create the ignored local environment file and set four non-empty development
 passwords:
@@ -170,13 +220,16 @@ unique smoke insert through PostgreSQL → Debezium → Kafka, records evidence
 under ignored `.local/infra-validation/`, and preserves volumes. An optional
 Docker-integrated WSL path remains available as `bash infra/validate.sh`.
 
-Start the durable ingestion and API layers:
+Start the durable ingestion, API, and UI layers:
 
 ```powershell
-docker compose up -d --build --wait ingestion api
+docker compose up -d --build --wait ingestion api ui
 docker compose ps
-docker compose logs --tail=100 ingestion api ingestion-migrate
+docker compose logs --tail=100 ingestion api ui ingestion-migrate
 ```
+
+Open `http://127.0.0.1:8501` for the dashboard or
+`http://127.0.0.1:18000/docs` for the read-only API documentation.
 
 Stop containers while preserving all named volumes:
 
@@ -233,6 +286,7 @@ run, result, quality, and metric evidence; both CDC checkpoint lags were zero.
 
 ```text
 app/                         FastAPI application and container
+ui/                          Streamlit investigation dashboard and API client
 ingestion/                   Debezium parser, consumer, and durable storage
 infra/debezium/              Connector and worker configuration
 infra/postgres/              Source, ingestion, reconciliation, API, quality SQL
@@ -248,6 +302,8 @@ compose.yaml                 Local service topology and resource limits
 - The local Kafka and PostgreSQL deployment is single-node and has no failover.
 - Kafka, Connect, and the API have no authentication; host ports bind to
   loopback and must not be exposed publicly.
+- The Streamlit dashboard is a local demonstration UI without authentication;
+  it must remain loopback-bound and relies on the API's current result views.
 - Quality checks and reconciliation are manual SQL calls; there is no scheduler.
 - The API uses offset pagination and provides current result details, not a full
   historical result-detail archive.
